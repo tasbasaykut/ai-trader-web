@@ -10,54 +10,25 @@ from xgboost import XGBRegressor
 from sklearn.preprocessing import StandardScaler
 
 # --- SAYFA AYARLARI ---
-st.set_page_config(page_title="A.S.T. Finansal Terminal", layout="wide")
+st.set_page_config(page_title="A.S.T. Hibrit Risk Terminali", layout="wide")
 
-# --- GELİŞMİŞ CSS (Renk ve Okunabilirlik Düzeltmesi) ---
+# --- GELİŞMİŞ CSS (Karanlık Mod & Okunabilirlik) ---
 st.markdown("""
     <style>
-    /* Ana sayfa arka planını karanlık yap */
-    .stApp {
-        background-color: #0E1117;
-    }
-
-    /* Metrik Kutucukları (Kartlar) */
+    .stApp { background-color: #0E1117; }
     div[data-testid="stMetric"] {
-        background-color: #262730; /* Koyu gri arka plan */
-        border: 1px solid #4F4F4F; /* İnce gri kenarlık */
+        background-color: #1E1E26;
+        border: 1px solid #3E3E4E;
         padding: 15px;
-        border-radius: 12px; /* Köşeleri yuvarla */
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3); /* Hafif gölge efekti */
+        border-radius: 12px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.4);
     }
-
-    /* Metrik Başlıkları (Son Fiyat, Piyasa vb.) */
-    div[data-testid="stMetric"] > div > label {
-        color: #BFC5D3 !important; /* Açık gri başlık rengi */
-        font-weight: 500;
-    }
-
-    /* Metrik Değerleri (296.50 TL vb.) */
-    div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
-        color: #FFFFFF !important; /* Parlak beyaz değer rengi */
-        font-weight: 700;
-    }
-
-    /* Fark Yüzdesi (Yeşil/Kırmızı değişim) */
-    div[data-testid="stMetricDelta"] {
-        font-weight: 600;
-    }
-
-    /* Sekme (Tab) Başlıkları */
-    .stTabs [data-baseweb="tab"] {
-        color: #BFC5D3;
-    }
-    .stTabs [aria-selected="true"] {
-        color: #FFFFFF !important;
-        border-bottom-color: #FF4B4B !important;
-    }
+    div[data-testid="stMetric"] > div > label { color: #BFC5D3 !important; font-weight: 500; }
+    div[data-testid="stMetric"] div[data-testid="stMetricValue"] { color: #FFFFFF !important; font-weight: 700; }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("📊 A.S.T. Hibrit Yatırım Terminali")
+st.title("🛡️ A.S.T. Hibrit Terminali: Risk & Performans")
 st.sidebar.header("🕹️ Kontrol Paneli")
 
 # --- SIDEBAR GİRDİLERİ ---
@@ -78,7 +49,6 @@ def verileri_hazirla(ticker, period, _sma_k, _sma_u):
     if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
     if df.empty: return None
 
-    # Teknikler
     df['SMA_K'] = df['Close'].rolling(_sma_k).mean()
     df['SMA_U'] = df['Close'].rolling(_sma_u).mean()
     df['RSI'] = 100 - (100 / (1 + (df['Close'].diff().where(df['Close'].diff() > 0, 0).rolling(14).mean() /
@@ -93,14 +63,10 @@ def model_calistir(df):
     features = ['RSI', 'Volatilite', 'Ret_Lag1']
     X = df[features]
     y = df['Target_Return']
-
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
-
     model = XGBRegressor(n_estimators=100, learning_rate=0.05, max_depth=4, random_state=42)
     model.fit(X_scaled, y)
-
-    # Tüm veri için tahminler (Kar/Zarar analizi için)
     df['AI_Pred_Return'] = model.predict(X_scaled)
     return model, scaler, features
 
@@ -112,54 +78,77 @@ if data is not None:
     model, scaler, feature_cols = model_calistir(data)
 
     # 1. HİBRİT STRATEJİ HESAPLAMA
-    # Kural: SMA_K > SMA_U (Trend Yukarı) VE AI Pozitif Getiri Bekliyor
     data['Sinyal'] = np.where((data['SMA_K'] > data['SMA_U']) & (data['AI_Pred_Return'] > 0), 1, 0)
 
     # Getiri Hesapları
     data['Market_Cum'] = (1 + data['Close'].pct_change()).cumprod() * nakit
     data['Strategy_Cum'] = (1 + (data['Close'].pct_change() * data['Sinyal'].shift(1))).cumprod() * nakit
 
-    # 2. ÜST METRİKLER (ÖZET)
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Son Fiyat", f"{data['Close'].iloc[-1]:.2f} TL")
-    m2.metric("Piyasa (Al-Tut)", f"{data['Market_Cum'].iloc[-1]:.2f} TL")
-    m3.metric("Hibrit Robot", f"{data['Strategy_Cum'].iloc[-1]:.2f} TL",
-              f"{((data['Strategy_Cum'].iloc[-1] / data['Market_Cum'].iloc[-1]) - 1) * 100:.1f}% Fark")
+    # 2. RİSK METRİKLERİ HESAPLAMA (Maximum Drawdown)
+    # Strateji için MDD
+    data['Strategy_Peak'] = data['Strategy_Cum'].cummax()
+    data['Strategy_DD'] = (data['Strategy_Cum'] - data['Strategy_Peak']) / data['Strategy_Peak']
+    mdd_strategy = data['Strategy_DD'].min()
 
-    # Yarınki AI Tahmini
+    # Piyasa için MDD
+    data['Market_Peak'] = data['Market_Cum'].cummax()
+    data['Market_DD'] = (data['Market_Cum'] - data['Market_Peak']) / data['Market_Peak']
+    mdd_market = data['Market_DD'].min()
+
+    # 3. ÜST METRİKLER (2 Satır Halinde)
+    st.subheader("🏁 Performans Özet Tablosu")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Son Fiyat", f"{data['Close'].iloc[-1]:.2f} TL")
+    c2.metric("Piyasa Final", f"{data['Market_Cum'].iloc[-1]:.2f} TL")
+    c3.metric("Robot Final", f"{data['Strategy_Cum'].iloc[-1]:.2f} TL")
+
     son_input = scaler.transform(data[feature_cols].tail(1))
     yarinki_beklenti = model.predict(son_input)[0]
-    m4.metric("AI Yarın Beklentisi", f"%{yarinki_beklenti * 100:.2f}")
+    c4.metric("AI Yarın Tahmini", f"%{yarinki_beklenti * 100:.2f}")
 
-    # 3. GÖRSEL PANELLER
-    tab1, tab2, tab3 = st.tabs(["📈 Kar/Zarar Kıyaslaması", "🔍 Teknik Analiz", "🤖 AI Detayları"])
+    st.subheader("🛡️ Risk Analizi (Zarar Durumu)")
+    r1, r2, r3, r4 = st.columns(4)
+    r1.metric("Robot Max Zarar", f"%{mdd_strategy * 100:.2f}")
+    r2.metric("Piyasa Max Zarar", f"%{mdd_market * 100:.2f}")
+
+    # Kazanma Oranı (Win Rate)
+    win_rate = (data['Sinyal'].shift(1) * data['Close'].pct_change() > 0).sum() / (data['Sinyal'].shift(1) > 0).sum()
+    r3.metric("İşlem Başarı Oranı", f"%{win_rate * 100:.1f}")
+
+    # Toplam İşlem Sayısı
+    islem_sayisi = (data['Sinyal'].diff() == 1).sum()
+    r4.metric("Toplam Alım", f"{islem_sayisi} Kez")
+
+    # 4. GÖRSEL PANELLER
+    tab1, tab2, tab3 = st.tabs(["📈 Kümülatif Getiri", "🔍 Teknik & Drawdown", "🤖 AI Detayları"])
 
     with tab1:
-        st.subheader("Robot vs Piyasa Performansı")
+        st.subheader("Strateji Karşılaştırması")
         st.line_chart(data[['Market_Cum', 'Strategy_Cum']])
-        st.caption(f"{nakit} TL yatırımın zaman içindeki değişimi (Mavi: Robot, Gri: Piyasa)")
 
     with tab2:
-        st.subheader("Fiyat ve Hareketli Ortalamalar")
+        st.subheader("Drawdown (Anlık Kayıp Grafiği)")
+        # Drawdown grafiği hissenin nerede tepeden düştüğünü gösterir
+        st.area_chart(data[['Strategy_DD', 'Market_DD']])
+        st.caption("Grafiğin aşağı sarkması, o dönemde zirveden yaşanan kaybı temsil eder.")
+
+        st.subheader("Teknik Trend (SMA)")
         st.line_chart(data[['Close', 'SMA_K', 'SMA_U']])
-        st.subheader("RSI (Güç) Göstergesi")
-        st.area_chart(data['RSI'])
 
     with tab3:
-        st.subheader("Modelin Son Tahmin Performansı")
+        st.subheader("Tahmin vs Gerçek")
         compare = pd.DataFrame({
             'Gerçekleşen': data['Target_Return'].tail(15),
             'AI Tahmini': data['AI_Pred_Return'].tail(15)
         })
         st.bar_chart(compare)
 
-        # Karar Kutusu
         if yarinki_beklenti > 0.005:
             st.success(f"🚀 **AI Kararı:** Yarın için güçlü yükseliş beklentisi (%{yarinki_beklenti * 100:.2f})")
         elif yarinki_beklenti < -0.005:
             st.error(f"⚠️ **AI Kararı:** Yarın için düşüş riski (%{yarinki_beklenti * 100:.2f})")
         else:
-            st.warning("⚖️ **AI Kararı:** Belirgin bir yön yok, yatay seyir bekleniyor.")
+            st.warning("⚖️ **AI Kararı:** Belirgin bir yön yok.")
 
 else:
-    st.error("Veri alınamadı. Lütfen sembolü (Örn: THYAO.IS) kontrol edin.")
+    st.error("Veri alınamadı.")
