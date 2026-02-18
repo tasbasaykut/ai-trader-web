@@ -12,11 +12,48 @@ from sklearn.preprocessing import StandardScaler
 # --- SAYFA AYARLARI ---
 st.set_page_config(page_title="A.S.T. Finansal Terminal", layout="wide")
 
-# Şık bir görünüm için özel CSS
+# --- GELİŞMİŞ CSS (Renk ve Okunabilirlik Düzeltmesi) ---
 st.markdown("""
     <style>
-    .main { background-color: #f8f9fa; }
-    .stMetric { border: 1px solid #e0e0e0; padding: 15px; border-radius: 12px; background: white; }
+    /* Ana sayfa arka planını karanlık yap */
+    .stApp {
+        background-color: #0E1117;
+    }
+
+    /* Metrik Kutucukları (Kartlar) */
+    div[data-testid="stMetric"] {
+        background-color: #262730; /* Koyu gri arka plan */
+        border: 1px solid #4F4F4F; /* İnce gri kenarlık */
+        padding: 15px;
+        border-radius: 12px; /* Köşeleri yuvarla */
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3); /* Hafif gölge efekti */
+    }
+
+    /* Metrik Başlıkları (Son Fiyat, Piyasa vb.) */
+    div[data-testid="stMetric"] > div > label {
+        color: #BFC5D3 !important; /* Açık gri başlık rengi */
+        font-weight: 500;
+    }
+
+    /* Metrik Değerleri (296.50 TL vb.) */
+    div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
+        color: #FFFFFF !important; /* Parlak beyaz değer rengi */
+        font-weight: 700;
+    }
+
+    /* Fark Yüzdesi (Yeşil/Kırmızı değişim) */
+    div[data-testid="stMetricDelta"] {
+        font-weight: 600;
+    }
+
+    /* Sekme (Tab) Başlıkları */
+    .stTabs [data-baseweb="tab"] {
+        color: #BFC5D3;
+    }
+    .stTabs [aria-selected="true"] {
+        color: #FFFFFF !important;
+        border-bottom-color: #FF4B4B !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
