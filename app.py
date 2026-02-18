@@ -3,16 +3,16 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import matplotlib
-matplotlib.use('Agg') # Bulut sunucusu uyumu
+matplotlib.use('Agg') # Sunucu ortamı için grafik motorunu sabitleyelim
 import matplotlib.pyplot as plt
 from xgboost import XGBRegressor
 from sklearn.preprocessing import StandardScaler
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 # --- 1. SAYFA VE TEMA AYARLARI ---
-st.set_page_config(page_title="A.S.T. Ultra Terminal", layout="wide")
+st.set_page_config(page_title="A.S.T. Ultra Terminal v11.1", layout="wide")
 
-# Metrik kutularının okunabilirliği için karanlık mod CSS düzeltmesi
+# Okunabilirlik için karanlık mod CSS düzeltmesi
 st.markdown("""
     <style>
     .stApp { background-color: #0E1117; }
@@ -30,41 +30,42 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🛡️ A.S.T. Ultra Hibrit Yatırım Terminali")
-st.caption("Teknik + Temel + Yapay Zeka + Duygu Analizi + Risk Yönetimi")
+st.title("🛡️ A.S.T. Ultra Hibrit v11.1 (Teşhis Modu)")
+st.caption("Teknik + Temel + XGBoost + Duygu Analizi (NLP) + Detaylı Haber Takibi")
 
-# --- 2. YARDIMCI FONKSİYONLAR ---
+# --- 2. GELİŞMİŞ FONKSİYONLAR ---
 
 def haber_duygusu_analizi(ticker):
-    """Haber başlıklarını çeker ve duygu puanı ile başlık listesini döndürür."""
+    """Haber başlıklarını çeker, tek tek puanlar ve detaylı liste döndürür."""
     try:
         s = yf.Ticker(ticker)
         haberler = s.news
-        if not haberler: 
-            return 0.0, []
+        if not haberler or len(haberler) == 0:
+            return 0.0, ["Veri Kaynağında Haber Bulunamadı ⚠️"]
         
         analyzer = SentimentIntensityAnalyzer()
         skorlar = []
-        basliklar = []
+        detayli_basliklar = []
         
         for h in haberler[:5]:
             title = h['title']
             vs = analyzer.polarity_scores(title)
-            skorlar.append(vs['compound'])
-            basliklar.append(title)
+            skor = vs['compound']
+            skorlar.append(skor)
+            # Başlığı ve yanına aldığı NLP puanını ekle
+            detayli_basliklar.append(f"{title} (Duygu Skoru: {skor})")
             
-        return sum(skorlar) / len(skorlar), basliklar
-    except: 
-        return 0.0, []
+        ortalama_skor = sum(skorlar) / len(skorlar)
+        return ortalama_skor, detayli_basliklar
+    except Exception as e:
+        return 0.0, [f"Hata Oluştu: {str(e)}"]
 
 @st.cache_data
 def tum_verileri_hazirla(ticker, period, _sma_k, _sma_u):
-    # Teknik Veriler
     df = yf.download(ticker, period=period, interval="1d")
     if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
     if df.empty: return None, None, None
     
-    # Şirket Temelleri
     s = yf.Ticker(ticker)
     finansallar = s.financials
     info = s.info
@@ -78,30 +79,24 @@ def tum_verileri_hazirla(ticker, period, _sma_k, _sma_u):
     df['RSI'] = 100 - (100 / (1 + (gain/loss)))
     df['Volatilite'] = df['Close'].pct_change().rolling(10).std()
     df['Ret_Lag1'] = df['Close'].pct_change()
-    
-    # Hedef Değişken
     df['Target_Return'] = df['Close'].pct_change().shift(-1)
     
     return df.dropna(), finansallar, info
 
 def model_egit_ve_tahmin(df, duygu_skoru):
-    # Model artık Teknik + Duygu verilerine bakıyor
     df['Sentiment'] = duygu_skoru
     features = ['RSI', 'Volatilite', 'Sentiment', 'Ret_Lag1']
     X = df[features]
     y = df['Target_Return']
-    
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
-    
     model = XGBRegressor(n_estimators=100, learning_rate=0.05, max_depth=5, random_state=42)
     model.fit(X_scaled, y)
-    
     df['AI_Pred'] = model.predict(X_scaled)
     return model, scaler, features
 
-# --- 3. KONTROL PANELİ (SIDEBAR) ---
-hisse = st.sidebar.text_input("Hisse Kodu (Örn: THYAO.IS)", value="THYAO.IS")
+# --- 3. KONTROL PANELİ ---
+hisse = st.sidebar.text_input("Hisse Kodu (Örn: THYAO.IS veya TSLA)", value="THYAO.IS")
 zaman_secenekleri = {"1 Yıl": "1y", "2 Yıl": "2y", "5 Yıl": "5y"}
 secilen_period = zaman_secenekleri[st.sidebar.selectbox("Analiz Dönemi", list(zaman_secenekleri.keys()), index=1)]
 nakit = st.sidebar.number_input("Başlangıç Sermayesi (TL)", value=1000)
@@ -112,19 +107,17 @@ sma_u = st.sidebar.slider("Uzun SMA", 30, 100, 50)
 
 # --- 4. ANA AKIŞ ---
 try:
-    # Verileri ve Haberleri Çek
+    # Haberleri ve Verileri Çek
     data, financials, info = tum_verileri_hazirla(hisse, secilen_period, sma_k, sma_u)
     duygu_skoru, haber_listesi = haber_duygusu_analizi(hisse)
     
     if data is not None:
         model, scaler, feature_cols = model_egit_ve_tahmin(data, duygu_skoru)
         
-        # Strateji ve Kar/Zarar Hesapları
+        # Strateji ve Kar/Zarar
         data['Sinyal'] = np.where((data['SMA_K'] > data['SMA_U']) & (data['AI_Pred'] > 0), 1, 0)
         data['Market_Cum'] = (1 + data['Close'].pct_change()).cumprod() * nakit
         data['Strategy_Cum'] = (1 + (data['Close'].pct_change() * data['Sinyal'].shift(1))).cumprod() * nakit
-        
-        # MDD (Maksimum Zarar)
         strategy_peak = data['Strategy_Cum'].cummax()
         data['Strategy_DD'] = (data['Strategy_Cum'] - strategy_peak) / strategy_peak
         mdd_val = data['Strategy_DD'].min()
@@ -141,44 +134,38 @@ try:
         m4.metric("Haber Duygusu", f"{duygu_skoru:.2f}", durum)
 
         # --- SEKMELER ---
-        t1, t2, t3, t4 = st.tabs(["📈 Performans", "🔍 Teknik & Risk", "🤖 AI & Haberler", "🏢 Şirket Büyümesi"])
+        t1, t2, t3, t4 = st.tabs(["📈 Performans", "🔍 Teknik & Risk", "🤖 AI & Haber Teşhis", "🏢 Şirket Büyümesi"])
         
         with t1:
-            st.subheader("Robot vs Piyasa Kümülatif Getiri")
             st.line_chart(data[['Market_Cum', 'Strategy_Cum']])
 
         with t2:
-            st.subheader("Drawdown (Kayıp Durumu)")
             st.area_chart(data['Strategy_DD'])
-            st.subheader("Teknik Trend")
             st.line_chart(data[['Close', 'SMA_K', 'SMA_U']])
 
         with t3:
-            st.subheader("AI Tahmin Başarısı ve Haber Analizi")
+            st.subheader("XGBoost + Sentiment Analiz Detayları")
             col_a, col_b = st.columns([1, 1])
             with col_a:
                 compare = pd.DataFrame({'Gerçek': data['Target_Return'].tail(15), 'AI': data['AI_Pred'].tail(15)})
                 st.bar_chart(compare)
             
             with col_b:
-                st.write("**Son Haber Başlıkları:**")
+                st.write("**Haber Başlıkları ve NLP Puanları:**")
                 if haber_listesi:
                     for h in haber_listesi:
                         st.write(f"🔹 {h}")
                 else:
-                    st.info("Bu hisse için güncel haber bulunamadı.")
+                    st.warning("Haber bulunamadı. Lütfen 'TSLA' yazarak sistemin çalıştığını test edin.")
             
             # Yarın Tahmini
             yarinki_input = scaler.transform(data[feature_cols].tail(1))
             y_pred = model.predict(yarinki_input)[0]
-            if y_pred > 0.005: 
-                st.success(f"🚀 AI Yarın İçin Yükseliş Bekliyor: %{y_pred*100:.2f}")
-            else: 
-                st.warning(f"⚖️ Robot Yarın İçin Temkinli: %{y_pred*100:.2f}")
+            if y_pred > 0.005: st.success(f"🚀 AI Yükseliş Bekliyor: %{y_pred*100:.2f}")
+            else: st.warning(f"⚖️ Robot Temkinli: %{y_pred*100:.2f}")
 
         with t4:
             st.subheader(f"🏢 {info.get('longName', hisse)} Büyüme Analizi")
-            st.write(f"**Sektör:** {info.get('sector', 'N/A')} | **P/E:** {info.get('trailingPE', 'N/A')}")
             if financials is not None and not financials.empty:
                 yillik = financials.loc[['Total Revenue', 'Net Income']].T.sort_index()
                 yillik.index = yillik.index.year
