@@ -4,8 +4,10 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="1f828fb8-51f7-4650-9535-f58ab990092c" name="Changes" comment="time change added">
+    <list default="true" id="1f828fb8-51f7-4650-9535-f58ab990092c" name="Changes" comment="new ai mechanism XGBOOST">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -113,7 +115,15 @@
       <option name="project" value="LOCAL" />
       <updated>1771292219588</updated>
     </task>
-    <option name="localTasksCounter" value="2" />
+    <task id="LOCAL-00002" summary="new ai mechanism XGBOOST">
+      <option name="closed" value="true" />
+      <created>1771381848347</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1771381848347</updated>
+    </task>
+    <option name="localTasksCounter" value="3" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -121,6 +131,7 @@
   </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="time change added" />
-    <option name="LAST_COMMIT_MESSAGE" value="time change added" />
+    <MESSAGE value="new ai mechanism XGBOOST" />
+    <option name="LAST_COMMIT_MESSAGE" value="new ai mechanism XGBOOST" />
   </component>
 </project>

@@ -2,132 +2,127 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import matplotlib
+
+matplotlib.use('Agg')  # Bulut sunucusu uyumu
+import matplotlib.pyplot as plt
 from xgboost import XGBRegressor
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_absolute_error
-from sklearn.model_selection import train_test_split
 
-# --- SAYFA YAPILANDIRMASI ---
-st.set_page_config(page_title="XGBoost AI Finansal Terminal", layout="wide")
+# --- SAYFA AYARLARI ---
+st.set_page_config(page_title="A.S.T. Finansal Terminal", layout="wide")
 
-st.title("🛡️ A.S.T. Ultra AI Terminal v4")
-st.caption("XGBoost Regressor + Teknik İndikatörler + Yüzdesel Getiri Analizi")
+# Şık bir görünüm için özel CSS
+st.markdown("""
+    <style>
+    .main { background-color: #f8f9fa; }
+    .stMetric { border: 1px solid #e0e0e0; padding: 15px; border-radius: 12px; background: white; }
+    </style>
+    """, unsafe_allow_html=True)
 
-# --- SIDEBAR ---
-st.sidebar.header("⚙️ Ayarlar")
-hisse = st.sidebar.text_input("Hisse Sembolü", value="THYAO.IS")
-zaman_secenekleri = {"2 Yıl": "2y", "5 Yıl": "5y", "Maksimum": "max"}
-secilen_period = zaman_secenekleri[st.sidebar.selectbox("Veri Derinliği", list(zaman_secenekleri.keys()), index=1)]
+st.title("📊 A.S.T. Hibrit Yatırım Terminali")
+st.sidebar.header("🕹️ Kontrol Paneli")
+
+# --- SIDEBAR GİRDİLERİ ---
+hisse = st.sidebar.text_input("Hisse Kodu", value="THYAO.IS")
+zaman_secenekleri = {"1 Yıl": "1y", "2 Yıl": "2y", "5 Yıl": "5y"}
+secilen_period = zaman_secenekleri[st.sidebar.selectbox("Analiz Dönemi", list(zaman_secenekleri.keys()), index=1)]
+nakit = st.sidebar.number_input("Başlangıç Sermayesi (TL)", value=1000)
 
 st.sidebar.divider()
-sma_kisa = st.sidebar.slider("Kısa SMA", 5, 50, 20)
-sma_uzun = st.sidebar.slider("Uzun SMA", 20, 200, 50)
+sma_k = st.sidebar.slider("Kısa SMA", 5, 30, 20)
+sma_u = st.sidebar.slider("Uzun SMA", 30, 100, 50)
 
 
-# --- FONKSİYONLAR ---
-
+# --- VERİ VE MODEL MOTORU ---
 @st.cache_data
-def verileri_hazirla(ticker, period):
+def verileri_hazirla(ticker, period, _sma_k, _sma_u):
     df = yf.download(ticker, period=period, interval="1d")
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
+    if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+    if df.empty: return None
 
-    # 1. TEKNİK ÖZELLİKLER (FEATURES)
-    df['SMA_K'] = df['Close'].rolling(window=sma_kisa).mean()
-    df['SMA_U'] = df['Close'].rolling(window=sma_uzun).mean()
-
-    # RSI
-    delta = df['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-    df['RSI'] = 100 - (100 / (1 + (gain / loss)))
-
-    # MACD (Trendin gücünü ölçer)
-    exp1 = df['Close'].ewm(span=12, adjust=False).mean()
-    exp2 = df['Close'].ewm(span=26, adjust=False).mean()
-    df['MACD'] = exp1 - exp2
-
-    # Volatilite ve Getiri
-    df['Volatilite'] = df['Close'].pct_change().rolling(window=10).std()
+    # Teknikler
+    df['SMA_K'] = df['Close'].rolling(_sma_k).mean()
+    df['SMA_U'] = df['Close'].rolling(_sma_u).mean()
+    df['RSI'] = 100 - (100 / (1 + (df['Close'].diff().where(df['Close'].diff() > 0, 0).rolling(14).mean() /
+                                   -df['Close'].diff().where(df['Close'].diff() < 0, 0).rolling(14).mean())))
+    df['Volatilite'] = df['Close'].pct_change().rolling(10).std()
     df['Ret_Lag1'] = df['Close'].pct_change()
-
-    # Hedef (Target): Yarınki yüzde değişim
     df['Target_Return'] = df['Close'].pct_change().shift(-1)
-
     return df.dropna()
 
 
-def xgboost_model_egit(df):
-    features = ['RSI', 'MACD', 'Volatilite', 'Ret_Lag1', 'SMA_K']
+def model_calistir(df):
+    features = ['RSI', 'Volatilite', 'Ret_Lag1']
     X = df[features]
     y = df['Target_Return']
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
-
     scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
+    X_scaled = scaler.fit_transform(X)
 
-    # XGBoost Regressor Yapılandırması
-    # n_estimators: Ağaç sayısı
-    # learning_rate: Öğrenme hızı (Küçük olması daha iyi öğrenme ama daha yavaş işlem demek)
-    model = XGBRegressor(
-        n_estimators=1000,
-        learning_rate=0.01,
-        max_depth=5,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        random_state=42
-    )
+    model = XGBRegressor(n_estimators=100, learning_rate=0.05, max_depth=4, random_state=42)
+    model.fit(X_scaled, y)
 
-    model.fit(X_train_scaled, y_train)
-
-    y_pred = model.predict(X_test_scaled)
-    mae = mean_absolute_error(y_test, y_pred)
-    direction_acc = np.mean(np.sign(y_test) == np.sign(y_pred))
-
-    return model, scaler, mae, direction_acc, features
+    # Tüm veri için tahminler (Kar/Zarar analizi için)
+    df['AI_Pred_Return'] = model.predict(X_scaled)
+    return model, scaler, features
 
 
-# --- ANA AKIŞ ---
-try:
-    data = verileri_hazirla(hisse, secilen_period)
+# --- ANA UYGULAMA MANTIĞI ---
+data = verileri_hazirla(hisse, secilen_period, sma_k, sma_u)
 
-    if not data.empty:
-        # XGBoost Eğitim
-        model, scaler, mae, acc, f_list = xgboost_model_egit(data)
+if data is not None:
+    model, scaler, feature_cols = model_calistir(data)
 
-        # Tahmin
-        son_veri_scaled = scaler.transform(data[f_list].tail(1))
-        beklenen_getiri = model.predict(son_veri_scaled)[0]
+    # 1. HİBRİT STRATEJİ HESAPLAMA
+    # Kural: SMA_K > SMA_U (Trend Yukarı) VE AI Pozitif Getiri Bekliyor
+    data['Sinyal'] = np.where((data['SMA_K'] > data['SMA_U']) & (data['AI_Pred_Return'] > 0), 1, 0)
 
-        # Arayüz
-        st.subheader("🚀 XGBoost AI Tahmin Raporu")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Tahmin Edilen Yarınki Değişim", f"%{beklenen_getiri * 100:.2f}")
-        c2.metric("Yön Doğruluğu (Test)", f"%{acc * 100:.1f}")
-        c3.metric("Ortalama Hata", f"{mae:.4f}")
+    # Getiri Hesapları
+    data['Market_Cum'] = (1 + data['Close'].pct_change()).cumprod() * nakit
+    data['Strategy_Cum'] = (1 + (data['Close'].pct_change() * data['Sinyal'].shift(1))).cumprod() * nakit
 
-        # Strateji Onayı
-        st.divider()
-        if beklenen_getiri > 0.003 and data['SMA_K'].iloc[-1] > data['SMA_U'].iloc[-1]:
-            st.success("🟢 **GÜÇLÜ AL SİNYALİ:** Teknik Trend + XGBoost Onayı.")
-        elif beklenen_getiri < -0.003:
-            st.error("🔴 **GÜÇLÜ SAT SİNYALİ:** Yapay Zeka Düşüş Bekliyor.")
+    # 2. ÜST METRİKLER (ÖZET)
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Son Fiyat", f"{data['Close'].iloc[-1]:.2f} TL")
+    m2.metric("Piyasa (Al-Tut)", f"{data['Market_Cum'].iloc[-1]:.2f} TL")
+    m3.metric("Hibrit Robot", f"{data['Strategy_Cum'].iloc[-1]:.2f} TL",
+              f"{((data['Strategy_Cum'].iloc[-1] / data['Market_Cum'].iloc[-1]) - 1) * 100:.1f}% Fark")
+
+    # Yarınki AI Tahmini
+    son_input = scaler.transform(data[feature_cols].tail(1))
+    yarinki_beklenti = model.predict(son_input)[0]
+    m4.metric("AI Yarın Beklentisi", f"%{yarinki_beklenti * 100:.2f}")
+
+    # 3. GÖRSEL PANELLER
+    tab1, tab2, tab3 = st.tabs(["📈 Kar/Zarar Kıyaslaması", "🔍 Teknik Analiz", "🤖 AI Detayları"])
+
+    with tab1:
+        st.subheader("Robot vs Piyasa Performansı")
+        st.line_chart(data[['Market_Cum', 'Strategy_Cum']])
+        st.caption(f"{nakit} TL yatırımın zaman içindeki değişimi (Mavi: Robot, Gri: Piyasa)")
+
+    with tab2:
+        st.subheader("Fiyat ve Hareketli Ortalamalar")
+        st.line_chart(data[['Close', 'SMA_K', 'SMA_U']])
+        st.subheader("RSI (Güç) Göstergesi")
+        st.area_chart(data['RSI'])
+
+    with tab3:
+        st.subheader("Modelin Son Tahmin Performansı")
+        compare = pd.DataFrame({
+            'Gerçekleşen': data['Target_Return'].tail(15),
+            'AI Tahmini': data['AI_Pred_Return'].tail(15)
+        })
+        st.bar_chart(compare)
+
+        # Karar Kutusu
+        if yarinki_beklenti > 0.005:
+            st.success(f"🚀 **AI Kararı:** Yarın için güçlü yükseliş beklentisi (%{yarinki_beklenti * 100:.2f})")
+        elif yarinki_beklenti < -0.005:
+            st.error(f"⚠️ **AI Kararı:** Yarın için düşüş riski (%{yarinki_beklenti * 100:.2f})")
         else:
-            st.warning("🟡 **BEKLE:** Net bir yön tayin edilemedi.")
+            st.warning("⚖️ **AI Kararı:** Belirgin bir yön yok, yatay seyir bekleniyor.")
 
-        # Tahmin vs Gerçek Bar Chart
-        st.write("Modelin Son 15 Günlük Performansı (Tahmin vs Gerçek)")
-        test_indices = int(len(data) * 0.8)
-        y_test_real = data['Target_Return'].iloc[test_indices:]
-        y_pred_all = model.predict(scaler.transform(data[f_list].iloc[test_indices:]))
-
-        compare_df = pd.DataFrame({
-            'Gerçekleşen': y_test_real,
-            'XGBoost Tahmini': y_pred_all
-        }).tail(15)
-        st.bar_chart(compare_df)
-
-except Exception as e:
-    st.error(f"Sistem Hatası: {e}")
+else:
+    st.error("Veri alınamadı. Lütfen sembolü (Örn: THYAO.IS) kontrol edin.")
