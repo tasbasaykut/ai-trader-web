@@ -10,7 +10,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_absolute_error
 
 # --- 1. SAYFA YAPILANDIRMASI ---
-st.set_page_config(page_title="A.S.T. Ultra Terminal v16", layout="wide")
+st.set_page_config(page_title="A.S.T. Ultra Terminal v16.1", layout="wide")
 
 st.markdown("""
     <style>
@@ -22,8 +22,8 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🔮 A.S.T. Ultra v16: Profesyonel Tahmin & Analiz")
-st.caption("Gelişmiş Görselleştirme + Hata Payı Analizi + Multi-Target AI")
+st.title("🔮 A.S.T. Ultra v16.1: Profesyonel Tahmin & Analiz")
+st.caption("Gelişmiş Görselleştirme + Tarih Doğrulama + Multi-Target AI")
 
 # --- 2. VERİ VE MODEL MOTORU ---
 @st.cache_data
@@ -89,13 +89,17 @@ try:
         p_7d = m7.predict(last_row)[0]
         prob = mp.predict_proba(last_row)[0, 1]
 
+        # --- TARİH HESAPLAMALARI ---
+        son_veri_tarihi = data.index[-1].strftime('%d.%m.%Y')
+        tahmin_hedefi = (data.index[-1] + pd.Timedelta(days=1)).strftime('%d.%m.%Y')
+
         # ÜST METRİKLER
-        st.subheader("🏁 Stratejik Özet")
+        st.subheader(f"🏁 Performans Özet Tablosu ({son_veri_tarihi} Verileriyle)")
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Son Fiyat", f"{data['Close'].iloc[-1]:.2f} TL")
-        c2.metric("Yarın Beklenti", f"%{p_1d*100:.2f}")
-        c3.metric("7 Günlük Trend", f"%{p_7d*100:.2f}")
-        c4.metric("Yükseliş Güveni", f"%{prob*100:.1f}")
+        c1.metric("Son Kapanış Fiyatı", f"{data['Close'].iloc[-1]:.2f} TL")
+        c2.metric("Tahmin Hedefi", tahmin_hedefi)
+        c3.metric("Yükseliş Güveni", f"%{prob*100:.1f}")
+        c4.metric("Veri Güncelliği", son_veri_tarihi)
 
         # SEKMELER
         t1, t2, t3, t4, t5 = st.tabs(["🔮 Gelecek Kahini", "🤖 AI Model Performansı", "📈 Teknik Analiz", "🏢 Şirket Röntgeni", "🛡️ Risk Yönetimi"])
@@ -110,76 +114,4 @@ try:
             # Hata payını volatiliteye göre hesaplayalım
             vol = data['Volatility'].iloc[-1]
             future_prices = [current_price * (1 + (p_7d/7) * i) for i in range(1, 8)]
-            upper_bound = [p * (1 + vol * np.sqrt(i)) for i, p in enumerate(future_prices, 1)]
-            lower_bound = [p * (1 - vol * np.sqrt(i)) for i, p in enumerate(future_prices, 1)]
-            
-            # Gelişmiş Matplotlib Grafiği
-            fig, ax = plt.subplots(figsize=(12, 5))
-            ax.plot(data.index[-20:], data['Close'].tail(20), label="Geçmiş Fiyat", color='#00d4ff', linewidth=2)
-            ax.plot(future_dates, future_prices, label="AI Tahmini", linestyle='--', color='#ff4b4b', marker='o')
-            ax.fill_between(future_dates, lower_bound, upper_bound, color='#ff4b4b', alpha=0.1, label="Güven Aralığı (Risk Bölgesi)")
-            
-            ax.set_facecolor('#0E1117')
-            fig.patch.set_facecolor('#0E1117')
-            ax.tick_params(colors='white')
-            for spine in ax.spines.values(): spine.set_color('#3E3E4E')
-            plt.legend(facecolor='#1E1E26', labelcolor='white')
-            plt.grid(color='#3E3E4E', linestyle='--', alpha=0.5)
-            st.pyplot(fig)
-            
-            # Tahmin Tablosu (Yeterince veri kısmı)
-            st.write("**Detaylı Tahmin Verileri:**")
-            tahmin_df = pd.DataFrame({
-                "Tarih": future_dates.strftime('%Y-%m-%d'),
-                "Tahmin Edilen Fiyat": [f"{p:.2f} TL" for p in future_prices],
-                "Olası Alt Sınır": [f"{l:.2f} TL" for l in lower_bound],
-                "Olası Üst Sınır": [f"{u:.2f} TL" for u in upper_bound]
-            })
-            st.table(tahmin_df)
-
-        with t2:
-            st.subheader("🤖 AI Model Doğruluk Analizi")
-            st.write("Modelin son 15 gündeki performansı (Gerçekleşen vs Tahmin Edilen):")
-            
-            kiyas_df = pd.DataFrame({
-                'Gerçekleşen Getiri': data['Target_1d'].tail(15),
-                'AI Tahmini': data['AI_Pred_1d'].tail(15)
-            })
-            st.bar_chart(kiyas_df)
-            
-            # Hata Payı (MAE)
-            mae = mean_absolute_error(data['Target_1d'], data['AI_Pred_1d'])
-            st.info(f"💡 Ortalama Tahmin Hatası (MAE): %{mae*100:.4f}")
-
-        with t3:
-            col_l, col_r = st.columns(2)
-            with col_l:
-                st.write("**RSI (Aşırı Alım/Satım)**")
-                st.area_chart(data['RSI'].tail(100))
-            with col_r:
-                st.write("**Bollinger Bantları (Kanal Analizi)**")
-                st.line_chart(data[['Close', 'BB_Upper', 'BB_Lower']].tail(100))
-            st.write("**Hacim Değişimi**")
-            st.bar_chart(data['Volume'].tail(100))
-
-        with t4:
-            if financials is not None and not financials.empty:
-                st.write(f"**{info.get('longName')} Finansal Trendleri**")
-                st.bar_chart(financials.loc[['Total Revenue', 'Net Income']].T)
-            else: st.warning("Finansal veri bu sembol için eksik.")
-
-        with t5:
-            # Kar/Zarar Kıyaslaması (Eskiden gelen ana fonksiyon)
-            data['Sinyal'] = np.where((data['AI_Pred_1d'] > 0), 1, 0)
-            data['Strategy_Cum'] = (1 + (data['Target_1d'] * data['Sinyal'])).cumprod() * nakit
-            data['Market_Cum'] = (1 + data['Target_1d']).cumprod() * nakit
-            
-            st.subheader("Robot vs Piyasa (Backtest)")
-            st.line_chart(data[['Market_Cum', 'Strategy_Cum']])
-            
-            peak = data['Strategy_Cum'].cummax()
-            mdd = ((data['Strategy_Cum'] - peak) / peak).min()
-            st.error(f"📉 Maksimum Risk (Drawdown): %{mdd*100:.2f}")
-
-except Exception as e:
-    st.error(f"Sistem Hatası: {e}")
+            upper_bound = [p * (1 + vol * np.sqrt(i)) for i
