@@ -14,8 +14,8 @@ from sklearn.metrics import mean_absolute_error
 st.set_page_config(page_title="A.S.T. Ultra Terminal v17.1", layout="wide")
 
 # Telegram API Ayarları
-TELEGRAM_TOKEN = 8438099476
-CHAT_ID = 5026797450
+TELEGRAM_TOKEN = "8438099476:AAHWz26Y0bnInuskr_Qjgno4TjjiHOpJ7ao"
+CHAT_ID = "5026797450"
 
 def telegram_sinyal_gonder(mesaj):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
