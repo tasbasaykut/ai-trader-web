@@ -7,10 +7,9 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from xgboost import XGBRegressor
 from sklearn.preprocessing import StandardScaler
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 # --- 1. SAYFA YAPILANDIRMASI ---
-st.set_page_config(page_title="A.S.T. Ultra Terminal v12", layout="wide")
+st.set_page_config(page_title="A.S.T. Ultra Terminal v13", layout="wide")
 
 # Metrik kutularının okunabilirliği için geliştirilmiş CSS
 st.markdown("""
@@ -31,29 +30,9 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 st.title("🛡️ A.S.T. Ultra Hibrit Yatırım Terminali")
-st.caption("Teknik + Temel + Yapay Zeka + Duygu Analizi (NLP) + Risk Yönetimi")
+st.caption("Teknik Analiz + Temel Veri + Yapay Zeka + Risk Yönetimi")
 
 # --- 2. GELİŞMİŞ FONKSİYONLAR ---
-
-def haber_duygusu_analizi(ticker):
-    """Haber başlıklarını savunmacı bir şekilde çeker ve NLP puanı üretir."""
-    try:
-        s = yf.Ticker(ticker)
-        haberler = s.news
-        if not haberler: return 0.0, ["Haber bulunamadı."]
-        
-        analyzer = SentimentIntensityAnalyzer()
-        skorlar, basliklar = [], []
-        
-        for h in haberler[:5]:
-            # 'title' hatasını önlemek için güvenli erişim
-            baslik = h.get('title', h.get('text', 'Başlıksız Haber'))
-            vs = analyzer.polarity_scores(baslik)
-            skorlar.append(vs['compound'])
-            basliklar.append(f"{baslik} (Puan: {vs['compound']})")
-            
-        return sum(skorlar) / len(skorlar), basliklar
-    except: return 0.0, ["Veri çekme hatası."]
 
 @st.cache_data
 def tum_verileri_hazirla(ticker, period, _sma_k, _sma_u):
@@ -77,9 +56,9 @@ def tum_verileri_hazirla(ticker, period, _sma_k, _sma_u):
     
     return df.dropna(), finansallar, info
 
-def model_egit_ve_tahmin(df, duygu_skoru):
-    df['Sentiment'] = duygu_skoru
-    features = ['RSI', 'Vol', 'Sentiment', 'Ret']
+def model_egit_ve_tahmin(df):
+    # Haber verisi (Sentiment) çıkarıldı
+    features = ['RSI', 'Vol', 'Ret']
     X = df[features]
     y = df['Target']
     scaler = StandardScaler()
@@ -100,10 +79,9 @@ sma_u = st.sidebar.slider("Uzun SMA", 30, 100, 50)
 # --- 4. ANA AKIŞ ---
 try:
     data, financials, info = tum_verileri_hazirla(hisse, period, sma_k, sma_u)
-    duygu_skoru, haber_listesi = haber_duygusu_analizi(hisse)
 
     if data is not None:
-        model, scaler, f_list = model_egit_ve_tahmin(data, duygu_skoru)
+        model, scaler, f_list = model_egit_ve_tahmin(data)
         
         # Strateji ve Kar/Zarar
         data['Sinyal'] = np.where((data['SMA_K'] > data['SMA_U']) & (data['AI_Pred'] > 0), 1, 0)
@@ -112,7 +90,7 @@ try:
 
         # ÜST METRİKLER
         st.subheader("🏁 Performans & Risk Özeti")
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3 = st.columns(3)
         c1.metric("Son Fiyat", f"{data['Close'].iloc[-1]:.2f} TL")
         c2.metric("Robot Final", f"{data['Strategy_Cum'].iloc[-1]:.2f} TL", 
                   f"{((data['Strategy_Cum'].iloc[-1]/data['Market_Cum'].iloc[-1])-1)*100:.1f}% vs Piyasa")
@@ -120,12 +98,9 @@ try:
         peak = data['Strategy_Cum'].cummax()
         mdd = ((data['Strategy_Cum'] - peak) / peak).min()
         c3.metric("Max Zarar (Risk)", f"%{mdd*100:.2f}")
-        
-        durum = "Pozitif 🚀" if duygu_skoru > 0.05 else "Negatif ⚠️" if duygu_skoru < -0.05 else "Nötr 😐"
-        c4.metric("Haber Duygusu", f"{duygu_skoru:.2f}", durum)
 
         # SEKMELER
-        t1, t2, t3, t4 = st.tabs(["📈 Getiri", "🔍 Teknik & Risk", "🤖 AI/NLP Analizi", "🏢 Şirket Büyümesi"])
+        t1, t2, t3, t4 = st.tabs(["📈 Getiri", "🔍 Teknik & Risk", "🤖 AI Tahmin Analizi", "🏢 Şirket Büyümesi"])
         
         with t1:
             st.subheader("Kümülatif Getiri Kıyaslaması")
@@ -138,12 +113,8 @@ try:
             st.line_chart(data[['Close', 'SMA_K', 'SMA_U']])
 
         with t3:
-            st.subheader("AI Tahminleri ve Haber Detayları")
-            col_a, col_b = st.columns(2)
-            with col_a:
-                st.bar_chart(pd.DataFrame({'Gerçek': data['Target'].tail(15), 'AI': data['AI_Pred'].tail(15)}))
-            with col_b:
-                for b in haber_listesi: st.write(f"🔹 {b}")
+            st.subheader("AI Tahminleri ve Model Performansı")
+            st.bar_chart(pd.DataFrame({'Gerçek': data['Target'].tail(15), 'AI': data['AI_Pred'].tail(15)}))
             
             # Yarın Tahmini
             yarinki_input = scaler.transform(data[f_list].tail(1))
