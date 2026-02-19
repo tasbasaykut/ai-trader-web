@@ -34,7 +34,7 @@ def v16_veri_hazirla(ticker, period):
     
     s = yf.Ticker(ticker)
     
-    # İndikatörler (Tüm satırlar için hesaplanır)
+    # İndikatörler
     df['SMA_20'] = df['Close'].rolling(20).mean()
     df['BB_Std'] = df['Close'].rolling(20).std()
     df['BB_Upper'] = df['SMA_20'] + (df['BB_Std'] * 2)
@@ -51,7 +51,7 @@ def v16_veri_hazirla(ticker, period):
     df['Target_7d'] = (df['Close'].shift(-7) / df['Close']) - 1
     df['Target_Binary'] = (df['Target_1d'] > 0).astype(int)
     
-    # Tahmin için en son satırı sakla (henüz Target'ı oluşmamış en güncel veri)
+    # Tahmin için en son satırı ayır (Target'ı henüz oluşmamış taze veri)
     current_data = df.tail(1).copy()
     
     # Eğitim için sadece Target'ı dolu olanları kullan
@@ -89,7 +89,7 @@ try:
     if train_data is not None:
         m1, m7, mp, scaler, f_list = model_merkezi(train_data)
         
-        # En güncel satır ile gerçek yarını tahmin et
+        # En güncel satır ile gerçek yarını (bugünü) tahmin et
         last_row_scaled = scaler.transform(current_data[f_list])
         p_1d = m1.predict(last_row_scaled)[0]
         p_7d = m7.predict(last_row_scaled)[0]
