@@ -11,24 +11,20 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_absolute_error
 
 # --- 1. SAYFA YAPILANDIRMASI ---
-st.set_page_config(page_title="A.S.T. Ultra Terminal v20.2", layout="wide")
+st.set_page_config(page_title="A.S.T. Ultra Terminal v21", layout="wide")
 
-# Telegram API Ayarları
+# Telegram API Ayarları (Senin bilgilerini koruyorum)
 TELEGRAM_TOKEN = "8438099476:AAHWz26Y0bnInuskr_Qjgno4TjjiHOpJ7ao"
 CHAT_ID = "5026797450"
 
 def telegram_sinyal_gonder(mesaj, debug=False):
-    """
-    Telegram'a mesaj gönderir. 
-    debug=True ise hata mesajlarını ekranda gösterir.
-    """
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": mesaj, "parse_mode": "Markdown"}
     try:
         response = requests.post(url, json=payload, timeout=10)
         res_data = response.json()
         if res_data.get("ok"):
-            if debug: st.sidebar.success("✅ Telegram Bağlantısı Başarılı!")
+            if debug: st.sidebar.success("✅ Telegram Mesajı Gönderildi!")
             return True
         else:
             if debug: st.sidebar.error(f"❌ Telegram Hatası: {res_data.get('description')}")
@@ -36,6 +32,17 @@ def telegram_sinyal_gonder(mesaj, debug=False):
     except Exception as e:
         if debug: st.sidebar.error(f"❌ Bağlantı Hatası: {e}")
         return False
+
+def telegram_toplu_rapor(sonuclar):
+    if not sonuclar: return
+    mesaj = "☀️ *A.S.T. SABAH BÜLTENİ*\n" + "---------------------------\n"
+    for r in sonuclar:
+        mesaj += (f"📈 *{r['Hisse']}*\n"
+                  f"🔥 Güven: %{r['Guven']}\n"
+                  f"💰 Beklenti: %{r['Beklenti']}\n"
+                  f"---------------------------\n")
+    mesaj += "\n🚀 Hayırlı işlemler Aykut!"
+    telegram_sinyal_gonder(mesaj)
 
 st.markdown("""
     <style>
@@ -46,17 +53,16 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🛡️ A.S.T. Ultra v20.2: Master Terminal")
+st.title("🛡️ A.S.T. Ultra v21: Master Otomasyon Terminali")
 
 # --- 2. VERİ VE MODEL MOTORU ---
 @st.cache_data
-def v20_veri_hazirla(ticker, period):
+def v21_veri_hazirla(ticker, period):
     df = yf.download(ticker, period=period, interval="1d")
     if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
     if df.empty: return None, None, None, None
     s = yf.Ticker(ticker)
     
-    # Teknik İndikatörler
     df['SMA_20'] = df['Close'].rolling(20).mean()
     df['BB_Std'] = df['Close'].rolling(20).std()
     df['BB_Upper'] = df['SMA_20'] + (df['BB_Std'] * 2)
@@ -86,21 +92,39 @@ def model_merkezi(train_df):
     train_df['AI_Pred_1d'] = m1.predict(X_scaled)
     return m1, m7, mp, scaler, features
 
-# --- 3. SIDEBAR (TAM ÖZELLEŞTİRME) ---
-st.sidebar.header("⚙️ Portföy Kontrol")
+# --- 3. SIDEBAR ---
+st.sidebar.header("⚙️ Ayarlar & Otomasyon")
 custom_input = st.sidebar.text_area("Kıyaslanacak Hisse Listesi (Virgül ile)", value="THYAO.IS, ASELS.IS, EREGL.IS, FROTO.IS")
 izleme_listesi = [x.strip() for x in custom_input.split(",") if x.strip()]
 hisse = st.sidebar.selectbox("Detaylı Analiz Odağı", izleme_listesi)
 nakit = st.sidebar.number_input("Bakiye (TL)", value=1000)
 
 st.sidebar.markdown("---")
-# Bot Bağlantı Testi
+# Test ve Toplu Rapor Butonları
 if st.sidebar.button("🔌 Bot Bağlantısını Test Et"):
     telegram_sinyal_gonder("🔔 *Sistem Testi:* A.S.T. Bot bağlantısı şu an aktif! 🚀", debug=True)
 
+if st.sidebar.button("☀️ Tüm Listeyi Raporla"):
+    rapor_listesi = []
+    with st.spinner("Hisseler taranıyor..."):
+        for s_hisse in izleme_listesi:
+            try:
+                t_d, c_d, _, _ = v21_veri_hazirla(s_hisse, "2y")
+                m_1, _, m_p, sc, f_l = model_merkezi(t_d)
+                l_r = sc.transform(c_d[f_l])
+                prob, pred = m_p.predict_proba(l_r)[0, 1], m_1.predict(l_r)[0]
+                if prob >= 0.70:
+                    rapor_listesi.append({"Hisse": s_hisse, "Guven": round(prob*100, 1), "Beklenti": round(pred*100, 2)})
+            except: continue
+    if rapor_listesi:
+        telegram_toplu_rapor(rapor_listesi)
+        st.sidebar.success(f"✅ {len(rapor_listesi)} hisse Telegram'a raporlandı!")
+    else:
+        st.sidebar.warning("⚠️ Kriterlere uygun (%70+ güven) hisse bulunamadı.")
+
 # --- 4. ANA AKIŞ ---
 try:
-    train_data, current_data, financials, info = v20_veri_hazirla(hisse, "2y")
+    train_data, current_data, financials, info = v21_veri_hazirla(hisse, "2y")
 
     if train_data is not None:
         m1, m7, mp, scaler, f_list = model_merkezi(train_data)
@@ -113,16 +137,14 @@ try:
         c1.metric("Son Fiyat", f"{current_data['Close'].iloc[-1]:.2f} TL")
         c2.metric("Yarın Beklenti", f"%{p_1d*100:.2f}")
         c3.metric("Yükseliş Güveni", f"%{prob*100:.1f}")
-        c4.metric("Veri Tarihi", son_tarih)
+        c4.metric("Hisse Adı", info.get('shortName', hisse))
 
         # Telegram Sinyal Butonu
-        if st.sidebar.button("📩 Hisse Sinyalini Gönder"):
+        if st.sidebar.button("📩 Odak Hisse Sinyalini Gönder"):
             if prob >= 0.70:
-                mesaj = f"🚀 *SİNYAL:* {hisse}\n🔥 *Güven:* %{prob*100:.1f}\n💰 *Beklenti:* %{p_1d*100:.2f}\n📅 *Tarih:* {son_tarih}"
+                mesaj = f"🚀 *SİNYAL:* {hisse}\n🔥 *Güven:* %{prob*100:.1f}\n💰 *Beklenti:* %{p_1d*100:.2f}"
                 telegram_sinyal_gonder(mesaj, debug=True)
-                st.sidebar.success("Sinyal iletildi!")
-            else:
-                st.sidebar.warning(f"⚠️ Güven düşük (%{prob*100:.1f}). Sinyal engellendi.")
+            else: st.sidebar.warning(f"Güven düşük (%{prob*100:.1f})")
 
         t1, t2, t3, t4, t5, t6 = st.tabs(["🔮 Gelecek Kahini", "🤖 AI Performans", "📈 Teknik Analiz", "🏢 Şirket Röntgeni", "🛡️ Risk Yönetimi", "📊 Hızlı Kıyaslama"])
 
@@ -133,7 +155,6 @@ try:
             vol = train_data['Volatility'].iloc[-1]
             upper_bound = [p * (1 + vol * np.sqrt(i)) for i, p in enumerate(future_prices, 1)]
             lower_bound = [p * (1 - vol * np.sqrt(i)) for i, p in enumerate(future_prices, 1)]
-            
             fig, ax = plt.subplots(figsize=(12, 5))
             ax.plot(train_data.index[-30:], train_data['Close'].tail(30), label="Geçmiş Fiyat", color='#00d4ff', marker='o')
             ax.plot(future_dates, future_prices, label="AI Tahmini", linestyle='--', color='#ff4b4b', marker='s')
@@ -144,9 +165,8 @@ try:
             st.table(pd.DataFrame({"Tarih": future_dates.strftime('%d.%m.%Y'), "Hedef Fiyat": [f"{p:.2f} TL" for p in future_prices], "Günlük Getiri (%)": [f"%{((p/current_data['Close'].iloc[-1])-1)*100:.2f}" for p in future_prices]}))
 
         with t2:
-            st.subheader("🤖 Model Doğruluk Analizi")
-            kiyas_df = pd.DataFrame({'Gerçek': train_data['Target_1d'].tail(20), 'AI': train_data['AI_Pred_1d'].tail(20)})
-            st.bar_chart(kiyas_df)
+            st.subheader("🤖 Model Doğruluğu")
+            st.bar_chart(pd.DataFrame({'Gerçek': train_data['Target_1d'].tail(20), 'AI': train_data['AI_Pred_1d'].tail(20)}))
             st.info(f"💡 MAE: %{mean_absolute_error(train_data['Target_1d'], train_data['AI_Pred_1d'])*100:.4f}")
 
         with t3:
@@ -164,7 +184,7 @@ try:
             if financials is not None and not financials.empty: st.bar_chart(financials.loc[['Total Revenue', 'Net Income']].T)
 
         with t5:
-            st.subheader("🛡️ Risk ve Getiri Kıyaslaması (Backtest)")
+            st.subheader("🛡️ Risk ve Getiri (Backtest)")
             train_data['Sinyal'] = np.where((train_data['AI_Pred_1d'] > 0), 1, 0)
             train_data['Strategy_Cum'] = (1 + (train_data['Target_1d'] * train_data['Sinyal'])).cumprod() * nakit
             train_data['Market_Cum'] = (1 + train_data['Target_1d']).cumprod() * nakit
@@ -180,7 +200,7 @@ try:
                 with st.spinner("Analiz ediliyor..."):
                     for s_hisse in izleme_listesi:
                         try:
-                            t_d, c_d, _, _ = v20_veri_hazirla(s_hisse, "1y")
+                            t_d, c_d, _, _ = v21_veri_hazirla(s_hisse, "1y")
                             m_1, _, m_p, sc, f_l = model_merkezi(t_d)
                             l_r = sc.transform(c_d[f_l])
                             results.append({"Hisse": s_hisse, "Güven (%)": round(m_p.predict_proba(l_r)[0,1]*100,2), "Beklenti (%)": round(m_1.predict(l_r)[0]*100,2)})
@@ -190,4 +210,4 @@ try:
                 st.bar_chart(df_res.set_index("Hisse")["Güven (%)"])
 
 except Exception as e:
-    st.error(f"Sistem Hatası: {e}")
+    st.error(f"Hata: {e}")
