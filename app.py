@@ -11,14 +11,11 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_absolute_error
 
 # --- 1. SAYFA YAPILANDIRMASI ---
-st.set_page_config(page_title="A.S.T. Ultra Terminal v19", layout="wide")
+st.set_page_config(page_title="A.S.T. Ultra Terminal v20.1", layout="wide")
 
-# Telegram API (Bilgilerin korunuyor)
+# Telegram API Ayarların (Aynen Korundu)
 TELEGRAM_TOKEN = "8438099476:AAHWz26Y0bnInuskr_Qjgno4TjjiHOpJ7ao"
 CHAT_ID = "5026797450"
-
-# BIST10 Listesi (Hız için optimize edildi)
-BIST10 = ['AKBNK.IS', 'BIMAS.IS', 'EREGL.IS', 'FROTO.IS', 'GARAN.IS', 'ISCTR.IS', 'KCHOL.IS', 'THYAO.IS', 'TUPRS.IS', 'YKBNK.IS']
 
 def telegram_sinyal_gonder(mesaj):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -31,21 +28,21 @@ st.markdown("""
     .stApp { background-color: #0E1117; }
     div[data-testid="stMetric"] { background-color: #1E1E26; border: 1px solid #3E3E4E; padding: 15px; border-radius: 12px; }
     div[data-testid="stMetric"] div[data-testid="stMetricValue"] { color: #FFFFFF !important; font-weight: 700; }
-    .stTabs [data-baseweb="tab"] { color: #BFC5D3; }
-    .stTabs [aria-selected="true"] { color: #FFFFFF !important; border-bottom-color: #FF4B4B !important; }
+    .desc-box { background-color: #1E1E26; padding: 15px; border-radius: 8px; border-left: 5px solid #ff4b4b; margin: 10px 0; font-size: 14px; color: #BFC5D3; }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🛡️ A.S.T. Ultra v19: BIST10 & Veri Derinliği")
+st.title("🛡️ A.S.T. Ultra v20.1: Master Terminal")
 
 # --- 2. VERİ VE MODEL MOTORU ---
 @st.cache_data
-def v19_veri_hazirla(ticker, period):
+def v20_veri_hazirla(ticker, period):
     df = yf.download(ticker, period=period, interval="1d")
     if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
     if df.empty: return None, None, None, None
     s = yf.Ticker(ticker)
     
+    # Teknik İndikatörler
     df['SMA_20'] = df['Close'].rolling(20).mean()
     df['BB_Std'] = df['Close'].rolling(20).std()
     df['BB_Upper'] = df['SMA_20'] + (df['BB_Std'] * 2)
@@ -53,6 +50,8 @@ def v19_veri_hazirla(ticker, period):
     delta = df['Close'].diff()
     df['RSI'] = 100 - (100 / (1 + (delta.where(delta > 0, 0).rolling(14).mean() / -delta.where(delta < 0, 0).rolling(14).mean())))
     df['Volatility'] = df['Close'].pct_change().rolling(10).std()
+    
+    # Hedefler
     df['Target_1d'] = df['Close'].pct_change().shift(-1)
     df['Target_7d'] = (df['Close'].shift(-7) / df['Close']) - 1
     df['Target_Binary'] = (df['Target_1d'] > 0).astype(int)
@@ -66,127 +65,125 @@ def model_merkezi(train_df):
     X = train_df[features]
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
+    
     m1 = XGBRegressor(n_estimators=100, learning_rate=0.05, max_depth=5).fit(X_scaled, train_df['Target_1d'])
     m7 = XGBRegressor(n_estimators=100, learning_rate=0.05, max_depth=5).fit(X_scaled, train_df['Target_7d'])
     mp = XGBClassifier(n_estimators=100, eval_metric='logloss').fit(X_scaled, train_df['Target_Binary'])
+    
     train_df['AI_Pred_1d'] = m1.predict(X_scaled)
     return m1, m7, mp, scaler, features
 
-# --- 3. SIDEBAR ---
-st.sidebar.header("📁 Portföy & İzleme")
-izleme_listesi = st.sidebar.multiselect("Kıyaslanacak BIST10 Hisseleri", BIST10, default=BIST10[:5])
-hisse = st.sidebar.selectbox("Detaylı Analiz Odağı", BIST10, index=7) # Varsayılan THYAO
+# --- 3. SIDEBAR (TAM ÖZELLEŞTİRME) ---
+st.sidebar.header("⚙️ Portföy Kontrol")
+custom_input = st.sidebar.text_area("Kıyaslanacak Hisse Listesi (Virgül ile)", value="THYAO.IS, ASELS.IS, EREGL.IS, FROTO.IS")
+izleme_listesi = [x.strip() for x in custom_input.split(",") if x.strip()]
+hisse = st.sidebar.selectbox("Detaylı Analiz Odağı", izleme_listesi)
 nakit = st.sidebar.number_input("Bakiye (TL)", value=1000)
 
 # --- 4. ANA AKIŞ ---
 try:
-    train_data, current_data, financials, info = v19_veri_hazirla(hisse, "2y")
+    train_data, current_data, financials, info = v20_veri_hazirla(hisse, "2y")
 
     if train_data is not None:
         m1, m7, mp, scaler, f_list = model_merkezi(train_data)
         last_row_scaled = scaler.transform(current_data[f_list])
         p_1d, p_7d, prob = m1.predict(last_row_scaled)[0], m7.predict(last_row_scaled)[0], mp.predict_proba(last_row_scaled)[0, 1]
-        son_tarih, hedef_tarih = current_data.index[-1].strftime('%d.%m.%Y'), (current_data.index[-1] + pd.Timedelta(days=1)).strftime('%d.%m.%Y')
+        son_tarih = current_data.index[-1].strftime('%d.%m.%Y')
 
-        st.subheader(f"🏁 {hisse} Analiz Paneli")
+        # Telegram Sinyal Butonu
+        if st.sidebar.button("Telegram Sinyali Gönder"):
+            if prob >= 0.70:
+                mesaj = f"🚀 *SİNYAL:* {hisse}\n🔥 *Güven:* %{prob*100:.1f}\n💰 *Beklenti:* %{p_1d*100:.2f}"
+                telegram_sinyal_gonder(mesaj)
+                st.sidebar.success("Sinyal Gönderildi!")
+            else: st.sidebar.warning(f"Güven düşük (%{prob*100:.1f})")
+
+        # ÜST METRİKLER
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Son Kapanış", f"{current_data['Close'].iloc[-1]:.2f} TL")
-        c2.metric("AI Yarın Hedefi", hedef_tarih)
+        c1.metric("Son Fiyat", f"{current_data['Close'].iloc[-1]:.2f} TL")
+        c2.metric("Yarın Beklenti", f"%{p_1d*100:.2f}")
         c3.metric("Yükseliş Güveni", f"%{prob*100:.1f}")
-        c4.metric("Beklenen Getiri", f"%{p_1d*100:.2f}")
+        c4.metric("Veri Tarihi", son_tarih)
 
-        if st.sidebar.button("Telegram'a Raporla"):
-            mesaj = f"🚀 *A.S.T. v19 Sinyal*\n\n📈 *Hisse:* {hisse}\n🔥 *Güven:* %{prob*100:.1f}\n💰 *Beklenti:* %{p_1d*100:.2f}"
-            telegram_sinyal_gonder(mesaj)
-            st.sidebar.success("Mesaj gönderildi!")
+        t1, t2, t3, t4, t5, t6 = st.tabs(["🔮 Gelecek Kahini", "🤖 AI Performans", "📈 Teknik Analiz", "🏢 Şirket Röntgeni", "🛡️ Risk Yönetimi", "📊 Hızlı Kıyaslama"])
 
-        t1, t2, t3, t4, t5, t6 = st.tabs(["🔮 Gelecek Kahini", "🤖 AI Performans", "📈 Teknik Analiz", "🏢 Şirket Röntgeni", "🛡️ Risk Yönetimi", "📊 BIST10 Kıyaslama"])
-        
         with t1:
-            st.subheader("📍 7 Günlük Fiyat ve Risk Projeksiyonu")
+            st.subheader("📍 7 Günlük Fiyat Projeksiyonu")
             future_dates = pd.date_range(start=current_data.index[-1] + pd.Timedelta(days=1), periods=7)
-            current_price = current_data['Close'].iloc[-1]
-            future_prices = [current_price * (1 + (p_7d/7) * i) for i in range(1, 8)]
+            future_prices = [current_data['Close'].iloc[-1] * (1 + (p_7d/7) * i) for i in range(1, 8)]
             vol = train_data['Volatility'].iloc[-1]
-            
-            # Güven aralığı formülü: $Bound = Price_{t+n} \times (1 \pm Volatility \times \sqrt{n})$
             upper_bound = [p * (1 + vol * np.sqrt(i)) for i, p in enumerate(future_prices, 1)]
             lower_bound = [p * (1 - vol * np.sqrt(i)) for i, p in enumerate(future_prices, 1)]
             
             fig, ax = plt.subplots(figsize=(12, 5))
-            ax.plot(train_data.index[-30:], train_data['Close'].tail(30), label="Gerçek Fiyat", color='#00d4ff', marker='o', markersize=4)
-            ax.plot(future_dates, future_prices, label="AI Tahmin Yolu", linestyle='--', color='#ff4b4b', marker='s', markersize=5)
-            ax.fill_between(future_dates, lower_bound, upper_bound, color='#ff4b4b', alpha=0.15, label="Olası Sapma Bölgesi")
-            
-            for i, txt in enumerate(future_prices):
-                ax.annotate(f"{txt:.1f}", (future_dates[i], future_prices[i]), textcoords="offset points", xytext=(0,10), ha='center', color='white', fontsize=8)
-
-            ax.set_facecolor('#0E1117'); fig.patch.set_facecolor('#0E1117')
-            ax.tick_params(colors='white'); plt.grid(color='#3E3E4E', alpha=0.3); plt.legend(facecolor='#1E1E26', labelcolor='white')
+            ax.plot(train_data.index[-30:], train_data['Close'].tail(30), label="Geçmiş Fiyat", color='#00d4ff', marker='o')
+            ax.plot(future_dates, future_prices, label="AI Tahmini", linestyle='--', color='#ff4b4b', marker='s')
+            ax.fill_between(future_dates, lower_bound, upper_bound, color='#ff4b4b', alpha=0.15, label="Güven Aralığı")
+            for i, txt in enumerate(future_prices): ax.annotate(f"{txt:.1f}", (future_dates[i], future_prices[i]), xytext=(0,10), textcoords='offset points', ha='center', color='white', fontsize=9)
+            ax.set_facecolor('#0E1117'); fig.patch.set_facecolor('#0E1117'); ax.tick_params(colors='white'); plt.legend()
             st.pyplot(fig)
             
-            st.write("**Gelecek Periyodu Sayısal Verileri**")
-            tahmin_tablosu = pd.DataFrame({
-                "Tarih": future_dates.strftime('%d.%m.%Y'),
-                "AI Hedef Fiyat": [f"{p:.2f} TL" for p in future_prices],
-                "Olası En Düşük": [f"{l:.2f} TL" for l in lower_bound],
-                "Olası En Yüksek": [f"{u:.2f} TL" for u in upper_bound],
-                "Günlük Tahmini Getiri (%)": [f"%{((p/current_price)-1)*100:.2f}" for p in future_prices]
-            })
-            st.table(tahmin_tablosu)
+            st.markdown('<div class="desc-box"><b>Mühendislik Notu:</b> Kırmızı kesikli çizgi AI\'nın beklediği ana yoldur. Şeffaf alan ise <b>olasılık bulutudur</b>. Fiyatın bu alan içinde kalma ihtimali yüksektir.</div>', unsafe_allow_html=True)
+            st.table(pd.DataFrame({"Tarih": future_dates.strftime('%d.%m.%Y'), "Hedef Fiyat": [f"{p:.2f} TL" for p in future_prices], "Günlük Getiri (%)": [f"%{((p/current_data['Close'].iloc[-1])-1)*100:.2f}" for p in future_prices]}))
 
         with t2:
-            st.subheader("Model Doğruluk Analizi")
-            kiyas_df = pd.DataFrame({'Gerçek': train_data['Target_1d'].tail(20), 'AI': train_data['AI_Pred_1d'].tail(20)})
-            st.bar_chart(kiyas_df)
-            st.info(f"Ortalama Mutlak Hata (MAE): %{mean_absolute_error(train_data['Target_1d'], train_data['AI_Pred_1d'])*100:.4f}")
+            st.subheader("🤖 Model Doğruluk Analizi")
+            st.bar_chart(pd.DataFrame({'Gerçek': train_data['Target_1d'].tail(20), 'AI': train_data['AI_Pred_1d'].tail(20)}))
+            st.info(f"💡 MAE (Ortalama Yanılma Payı): %{mean_absolute_error(train_data['Target_1d'], train_data['AI_Pred_1d'])*100:.4f}")
 
         with t3:
-            st.subheader("Tam Teknik Analiz Seti")
-            # 1. Fiyat ve Bollinger
-            fig1, ax1 = plt.subplots(figsize=(12, 4))
-            ax1.plot(train_data.index[-100:], train_data['Close'].tail(100), label="Fiyat", color='white')
+            st.subheader("🔍 Teknik Analiz Kanalları")
+            # Bollinger Grafik
+            fig1, ax1 = plt.subplots(figsize=(12, 5))
+            ax1.plot(train_data.index[-100:], train_data['Close'].tail(100), label="Fiyat", color='white', linewidth=2)
             ax1.plot(train_data.index[-100:], train_data['SMA_20'].tail(100), label="SMA 20", color='orange', alpha=0.7)
             ax1.fill_between(train_data.index[-100:], train_data['BB_Lower'].tail(100), train_data['BB_Upper'].tail(100), color='gray', alpha=0.2, label="Bollinger")
             ax1.set_facecolor('#0E1117'); fig1.patch.set_facecolor('#0E1117'); ax1.tick_params(colors='white'); plt.legend()
             st.pyplot(fig1)
             
-            # 2. RSI
-            st.write("**RSI (Relative Strength Index)**")
-            st.area_chart(train_data['RSI'].tail(100))
+            st.markdown('<div class="desc-box"><b>Bollinger Bandı Nedir?</b> Fiyatın "normal" salınım aralığıdır. Fiyat beyaz çizgi olarak gri alanın dışına çıkarsa, aşırı bir hareket olduğunu ve kanala geri döneceğini anlarız.</div>', unsafe_allow_html=True)
             
-            # 3. Hacim
+            st.write("**RSI (Göreli Güç Endeksi)**")
+            st.area_chart(train_data['RSI'].tail(100))
+            st.markdown('<div class="desc-box"><b>RSI Nedir?</b> 70 üstü "aşırı alım" (fiyat pahalı), 30 altı "aşırı satım" (fiyat ucuz) bölgesidir.</div>', unsafe_allow_html=True)
+            
             st.write("**İşlem Hacmi**")
             st.bar_chart(train_data['Volume'].tail(100))
 
         with t4:
-            if financials is not None and not financials.empty:
-                st.bar_chart(financials.loc[['Total Revenue', 'Net Income']].T)
+            if financials is not None and not financials.empty: st.bar_chart(financials.loc[['Total Revenue', 'Net Income']].T)
 
         with t5:
+            st.subheader("🛡️ Risk ve Getiri Kıyaslaması (Backtest)")
             train_data['Sinyal'] = np.where((train_data['AI_Pred_1d'] > 0), 1, 0)
             train_data['Strategy_Cum'] = (1 + (train_data['Target_1d'] * train_data['Sinyal'])).cumprod() * nakit
-            st.line_chart(train_data['Strategy_Cum'])
+            train_data['Market_Cum'] = (1 + train_data['Target_1d']).cumprod() * nakit
+            st.line_chart(train_data[['Market_Cum', 'Strategy_Cum']])
+            
+            st.markdown('<div class="desc-box"><b>Backtest Nedir?</b> Mavi çizgi (Market) hisseyi sadece tutup bekleseydin paran ne olurdu onu gösterir. Turuncu çizgi (Strategy) ise robotun tahminlerine göre al-sat yapsaydın ne kazanacağını gösterir.</div>', unsafe_allow_html=True)
+            
+            peak = train_data['Strategy_Cum'].cummax()
+            dd = ((train_data['Strategy_Cum'] - peak) / peak)
+            st.write("**Anlık Zarar (Drawdown) Grafiği**")
+            st.area_chart(dd)
+            
+            st.markdown('<div class="desc-box"><b>Drawdown Nedir?</b> Zirveden ne kadar düştüğünü gösterir. Grafik ne kadar derinse, o hisseyi tutarken o kadar çok "bekleme zararı" çekmişsin demektir. Risk ölçüsüdür.</div>', unsafe_allow_html=True)
 
         with t6:
-            st.subheader("📊 BIST10 AI Kapışması")
+            st.subheader("📊 Liste İçi AI Kapışması")
             if len(izleme_listesi) > 0:
-                karsilastirma = []
-                with st.spinner("BIST10 verileri optimize edilerek çekiliyor..."):
+                results = []
+                with st.spinner("Analiz ediliyor..."):
                     for s_hisse in izleme_listesi:
                         try:
-                            t_d, c_d, _, _ = v19_veri_hazirla(s_hisse, "1y") # Hızlı analiz için 1y
+                            t_d, c_d, _, _ = v20_veri_hazirla(s_hisse, "1y")
                             m_1, _, m_p, sc, f_l = model_merkezi(t_d)
                             l_r = sc.transform(c_d[f_l])
-                            s_p = m_1.predict(l_r)[0]
-                            s_pr = m_p.predict_proba(l_r)[0, 1]
-                            karsilastirma.append({"Hisse": s_hisse, "Güven (%)": round(s_pr*100,2), "Beklenti (%)": round(s_p*100,2), "RSI": round(t_d['RSI'].iloc[-1],2)})
+                            results.append({"Hisse": s_hisse, "Güven (%)": round(m_p.predict_proba(l_r)[0,1]*100,2), "Beklenti (%)": round(m_1.predict(l_r)[0]*100,2)})
                         except: continue
-                
-                df_comp = pd.DataFrame(karsilastirma).sort_values(by="Güven (%)", ascending=False)
-                st.dataframe(df_comp, use_container_width=True)
-                st.bar_chart(df_comp.set_index("Hisse")["Güven (%)"])
-            else: st.info("Hisse seçiniz.")
+                df_res = pd.DataFrame(results).sort_values("Güven (%)", ascending=False)
+                st.dataframe(df_res, use_container_width=True)
+                st.bar_chart(df_res.set_index("Hisse")["Güven (%)"])
 
 except Exception as e:
     st.error(f"Hata: {e}")
