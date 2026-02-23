@@ -11,17 +11,31 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_absolute_error
 
 # --- 1. SAYFA YAPILANDIRMASI ---
-st.set_page_config(page_title="A.S.T. Ultra Terminal v20.1", layout="wide")
+st.set_page_config(page_title="A.S.T. Ultra Terminal v20.2", layout="wide")
 
-# Telegram API Ayarların (Aynen Korundu)
+# Telegram API Ayarları
 TELEGRAM_TOKEN = "8438099476:AAHWz26Y0bnInuskr_Qjgno4TjjiHOpJ7ao"
 CHAT_ID = "5026797450"
 
-def telegram_sinyal_gonder(mesaj):
+def telegram_sinyal_gonder(mesaj, debug=False):
+    """
+    Telegram'a mesaj gönderir. 
+    debug=True ise hata mesajlarını ekranda gösterir.
+    """
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": mesaj, "parse_mode": "Markdown"}
-    try: requests.post(url, json=payload)
-    except: pass
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        res_data = response.json()
+        if res_data.get("ok"):
+            if debug: st.sidebar.success("✅ Telegram Bağlantısı Başarılı!")
+            return True
+        else:
+            if debug: st.sidebar.error(f"❌ Telegram Hatası: {res_data.get('description')}")
+            return False
+    except Exception as e:
+        if debug: st.sidebar.error(f"❌ Bağlantı Hatası: {e}")
+        return False
 
 st.markdown("""
     <style>
@@ -32,7 +46,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🛡️ A.S.T. Ultra v20.1: Master Terminal")
+st.title("🛡️ A.S.T. Ultra v20.2: Master Terminal")
 
 # --- 2. VERİ VE MODEL MOTORU ---
 @st.cache_data
@@ -51,7 +65,6 @@ def v20_veri_hazirla(ticker, period):
     df['RSI'] = 100 - (100 / (1 + (delta.where(delta > 0, 0).rolling(14).mean() / -delta.where(delta < 0, 0).rolling(14).mean())))
     df['Volatility'] = df['Close'].pct_change().rolling(10).std()
     
-    # Hedefler
     df['Target_1d'] = df['Close'].pct_change().shift(-1)
     df['Target_7d'] = (df['Close'].shift(-7) / df['Close']) - 1
     df['Target_Binary'] = (df['Target_1d'] > 0).astype(int)
@@ -80,6 +93,11 @@ izleme_listesi = [x.strip() for x in custom_input.split(",") if x.strip()]
 hisse = st.sidebar.selectbox("Detaylı Analiz Odağı", izleme_listesi)
 nakit = st.sidebar.number_input("Bakiye (TL)", value=1000)
 
+st.sidebar.markdown("---")
+# Bot Bağlantı Testi
+if st.sidebar.button("🔌 Bot Bağlantısını Test Et"):
+    telegram_sinyal_gonder("🔔 *Sistem Testi:* A.S.T. Bot bağlantısı şu an aktif! 🚀", debug=True)
+
 # --- 4. ANA AKIŞ ---
 try:
     train_data, current_data, financials, info = v20_veri_hazirla(hisse, "2y")
@@ -90,20 +108,21 @@ try:
         p_1d, p_7d, prob = m1.predict(last_row_scaled)[0], m7.predict(last_row_scaled)[0], mp.predict_proba(last_row_scaled)[0, 1]
         son_tarih = current_data.index[-1].strftime('%d.%m.%Y')
 
-        # Telegram Sinyal Butonu
-        if st.sidebar.button("Telegram Sinyali Gönder"):
-            if prob >= 0.70:
-                mesaj = f"🚀 *SİNYAL:* {hisse}\n🔥 *Güven:* %{prob*100:.1f}\n💰 *Beklenti:* %{p_1d*100:.2f}"
-                telegram_sinyal_gonder(mesaj)
-                st.sidebar.success("Sinyal Gönderildi!")
-            else: st.sidebar.warning(f"Güven düşük (%{prob*100:.1f})")
-
         # ÜST METRİKLER
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Son Fiyat", f"{current_data['Close'].iloc[-1]:.2f} TL")
         c2.metric("Yarın Beklenti", f"%{p_1d*100:.2f}")
         c3.metric("Yükseliş Güveni", f"%{prob*100:.1f}")
         c4.metric("Veri Tarihi", son_tarih)
+
+        # Telegram Sinyal Butonu
+        if st.sidebar.button("📩 Hisse Sinyalini Gönder"):
+            if prob >= 0.70:
+                mesaj = f"🚀 *SİNYAL:* {hisse}\n🔥 *Güven:* %{prob*100:.1f}\n💰 *Beklenti:* %{p_1d*100:.2f}\n📅 *Tarih:* {son_tarih}"
+                telegram_sinyal_gonder(mesaj, debug=True)
+                st.sidebar.success("Sinyal iletildi!")
+            else:
+                st.sidebar.warning(f"⚠️ Güven düşük (%{prob*100:.1f}). Sinyal engellendi.")
 
         t1, t2, t3, t4, t5, t6 = st.tabs(["🔮 Gelecek Kahini", "🤖 AI Performans", "📈 Teknik Analiz", "🏢 Şirket Röntgeni", "🛡️ Risk Yönetimi", "📊 Hızlı Kıyaslama"])
 
@@ -122,32 +141,23 @@ try:
             for i, txt in enumerate(future_prices): ax.annotate(f"{txt:.1f}", (future_dates[i], future_prices[i]), xytext=(0,10), textcoords='offset points', ha='center', color='white', fontsize=9)
             ax.set_facecolor('#0E1117'); fig.patch.set_facecolor('#0E1117'); ax.tick_params(colors='white'); plt.legend()
             st.pyplot(fig)
-            
-            st.markdown('<div class="desc-box"><b>Mühendislik Notu:</b> Kırmızı kesikli çizgi AI\'nın beklediği ana yoldur. Şeffaf alan ise <b>olasılık bulutudur</b>. Fiyatın bu alan içinde kalma ihtimali yüksektir.</div>', unsafe_allow_html=True)
             st.table(pd.DataFrame({"Tarih": future_dates.strftime('%d.%m.%Y'), "Hedef Fiyat": [f"{p:.2f} TL" for p in future_prices], "Günlük Getiri (%)": [f"%{((p/current_data['Close'].iloc[-1])-1)*100:.2f}" for p in future_prices]}))
 
         with t2:
             st.subheader("🤖 Model Doğruluk Analizi")
-            st.bar_chart(pd.DataFrame({'Gerçek': train_data['Target_1d'].tail(20), 'AI': train_data['AI_Pred_1d'].tail(20)}))
-            st.info(f"💡 MAE (Ortalama Yanılma Payı): %{mean_absolute_error(train_data['Target_1d'], train_data['AI_Pred_1d'])*100:.4f}")
+            kiyas_df = pd.DataFrame({'Gerçek': train_data['Target_1d'].tail(20), 'AI': train_data['AI_Pred_1d'].tail(20)})
+            st.bar_chart(kiyas_df)
+            st.info(f"💡 MAE: %{mean_absolute_error(train_data['Target_1d'], train_data['AI_Pred_1d'])*100:.4f}")
 
         with t3:
             st.subheader("🔍 Teknik Analiz Kanalları")
-            # Bollinger Grafik
             fig1, ax1 = plt.subplots(figsize=(12, 5))
             ax1.plot(train_data.index[-100:], train_data['Close'].tail(100), label="Fiyat", color='white', linewidth=2)
             ax1.plot(train_data.index[-100:], train_data['SMA_20'].tail(100), label="SMA 20", color='orange', alpha=0.7)
             ax1.fill_between(train_data.index[-100:], train_data['BB_Lower'].tail(100), train_data['BB_Upper'].tail(100), color='gray', alpha=0.2, label="Bollinger")
             ax1.set_facecolor('#0E1117'); fig1.patch.set_facecolor('#0E1117'); ax1.tick_params(colors='white'); plt.legend()
             st.pyplot(fig1)
-            
-            st.markdown('<div class="desc-box"><b>Bollinger Bandı Nedir?</b> Fiyatın "normal" salınım aralığıdır. Fiyat beyaz çizgi olarak gri alanın dışına çıkarsa, aşırı bir hareket olduğunu ve kanala geri döneceğini anlarız.</div>', unsafe_allow_html=True)
-            
-            st.write("**RSI (Göreli Güç Endeksi)**")
             st.area_chart(train_data['RSI'].tail(100))
-            st.markdown('<div class="desc-box"><b>RSI Nedir?</b> 70 üstü "aşırı alım" (fiyat pahalı), 30 altı "aşırı satım" (fiyat ucuz) bölgesidir.</div>', unsafe_allow_html=True)
-            
-            st.write("**İşlem Hacmi**")
             st.bar_chart(train_data['Volume'].tail(100))
 
         with t4:
@@ -159,15 +169,9 @@ try:
             train_data['Strategy_Cum'] = (1 + (train_data['Target_1d'] * train_data['Sinyal'])).cumprod() * nakit
             train_data['Market_Cum'] = (1 + train_data['Target_1d']).cumprod() * nakit
             st.line_chart(train_data[['Market_Cum', 'Strategy_Cum']])
-            
-            st.markdown('<div class="desc-box"><b>Backtest Nedir?</b> Mavi çizgi (Market) hisseyi sadece tutup bekleseydin paran ne olurdu onu gösterir. Turuncu çizgi (Strategy) ise robotun tahminlerine göre al-sat yapsaydın ne kazanacağını gösterir.</div>', unsafe_allow_html=True)
-            
             peak = train_data['Strategy_Cum'].cummax()
             dd = ((train_data['Strategy_Cum'] - peak) / peak)
-            st.write("**Anlık Zarar (Drawdown) Grafiği**")
             st.area_chart(dd)
-            
-            st.markdown('<div class="desc-box"><b>Drawdown Nedir?</b> Zirveden ne kadar düştüğünü gösterir. Grafik ne kadar derinse, o hisseyi tutarken o kadar çok "bekleme zararı" çekmişsin demektir. Risk ölçüsüdür.</div>', unsafe_allow_html=True)
 
         with t6:
             st.subheader("📊 Liste İçi AI Kapışması")
@@ -186,4 +190,4 @@ try:
                 st.bar_chart(df_res.set_index("Hisse")["Güven (%)"])
 
 except Exception as e:
-    st.error(f"Hata: {e}")
+    st.error(f"Sistem Hatası: {e}")
