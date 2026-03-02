@@ -141,7 +141,7 @@ try:
 
         # Telegram Sinyal Butonu
         if st.sidebar.button("📩 Odak Hisse Sinyalini Gönder"):
-            if prob >= 0.70:
+            if prob >= 0.50:
                 mesaj = f"🚀 *SİNYAL:* {hisse}\n🔥 *Güven:* %{prob*100:.1f}\n💰 *Beklenti:* %{p_1d*100:.2f}"
                 telegram_sinyal_gonder(mesaj, debug=True)
             else: st.sidebar.warning(f"Güven düşük (%{prob*100:.1f})")
